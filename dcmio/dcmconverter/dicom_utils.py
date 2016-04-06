@@ -20,8 +20,11 @@ import numpy
 # Dcmio import
 from dcmio.dcmreader.dcmreader import get_repetition_time
 from dcmio.extensions.dcm2nii import Dcm2NiiWrapper
+from dcmio.extensions.dcm2niix import Dcm2NiixWrapper
 from dcmio.extensions.dcm2nii.exceptions import Dcm2NiiRuntimeError
+from dcmio.extensions.dcm2niix.exceptions import Dcm2NiixRuntimeError
 from dcmio.extensions.dcm2nii.exceptions import Dcm2NiiError
+from dcmio.extensions.dcm2niix.exceptions import Dcm2NiixError
 
 # Qap import
 from qap.viz.plotting import plot_mosaic
@@ -105,7 +108,7 @@ def dcm2nii(input, o, b):
         dcm2nii <options> <sourcenames>
     Options:
         -a Anonymize [remove identifying information]: Y,N = Y
-        -b load settings from specified inifile, e.g. '-b C:\set\t1.ini' 
+        -b load settings from specified inifile, e.g. '-b C:\set\t1.ini'
         -d Date in filename [filename.dcm -> 20061230122032.nii]: Y,N = N
         -e events (series/acq) in filename [filename.dcm -> s002a003.nii]: Y,N = N
         -f Source filename [e.g. filename.par -> filename.nii]: Y,N = N
@@ -114,7 +117,7 @@ def dcm2nii(input, o, b):
         -n output .nii file [if no, create .hdr/.img pair]: Y,N = Y
         -o Output Directory, e.g. 'C:\TEMP' (if unspecified, source directory is used)
         -p Protocol in filename [filename.dcm -> TFE_T1.nii]: Y,N = Y
-        -r Reorient image to nearest orthogonal: Y,N 
+        -r Reorient image to nearest orthogonal: Y,N
         -s SPM2/Analyze not SPM5/NIfTI [ignored if '-n y']: Y,N = N
         -t Text report (patient and scan details): Y,N = N
         -v Convert every image in the directory: Y,N = Y
@@ -201,6 +204,193 @@ def dcm2nii(input, o, b):
         skip = False
 
     return files, reoriented_files, reoriented_and_cropped_files, bvecs, bvals
+
+
+def generate_configx(niidir,
+                     anonymize=True,
+                     extract_info=True,
+                     add_comment=False,
+                     add_folder=True,
+                     add_subjectID=False,
+                     add_manufacturer=False,
+                     add_subjectName=False,
+                     add_protocol=True,
+                     add_sequence=False,
+                     add_serie=True,
+                     add_time=True,
+                     single_dicom=False,
+                     private_details=False,
+                     verbose=False,
+                     gzip=True,
+#                     begin_clip=0,
+#                     end_clip=0,
+                     write_config=True):
+    """ Generate a dcm2nii configuration file that disable the interactive
+    mode.
+
+    Parameters
+    ----------
+    niidir: str
+        The nifti destination folder.
+    anonymize: bool (optional, default True)
+        If 'True' then patient name will not be copied to NIfTI header.
+    gzip: bool (optional, default True)
+        If 'True' then dcm2nii will create compressed .nii.gz files.
+    add_comment, add_folder, add_subjectID, add_manufacturer, add_subjectName,
+    add_protocol, add_sequence, add_serie, add_time:
+    str (optional, default False, True, False, False, False, True, False,
+     True, True)
+        If 'True' then dcm2nii will add the requested element in the output
+        filename.
+    extract_info: bool(optional, defaut False). Create a "bids" file that
+    contains relevant information (such as slice timing, TR, TE...)
+    single_dicom: bool (optional, default False)
+        if 'True', then only the dicom file specified will be converter
+    private_details: bool (optional, default False)
+        text notes includes private patient details
+    verbose: bool (optional, default False)
+        if 'True', then verbosity enabled
+    begin_clip: int (optional, default 0)
+        Specifies number of volumes to be removed from the beginning of a 4D
+        acquisition.
+    end_clip: int (optional, default 0)
+        Specifies number of volumes to be removed from the end of a 4D
+        acquisition.
+    write_config: bool (optional, default True)
+        if 'True', then the configuration json will be writte in the output dir
+
+    Returns
+    -------
+    config_file: json
+        A dcm2niix json configuration file written in the input 'niidir'
+        folder if not specified otherwise
+
+    """
+    # Check the the destination folder exists
+    if not os.path.isdir(niidir):
+        raise ValueError("'{0}' folder does not exists.".format(niidir))
+
+    config = {}
+
+    MAP = {
+        True: "y",
+        False: "n"
+    }
+
+    # generate configuration
+    config["o"] = niidir
+    config["a"] = MAP[anonymize]
+    config["b"] = MAP[extract_info]
+
+    filename = []
+    if add_comment:
+        filename.append("%c")
+    if add_folder:
+        filename.append("%f")
+    if add_subjectID:
+        filename.append("%i")
+    if add_manufacturer:
+        filename.append("%m")
+    if add_subjectName:
+        filename.append("%n")
+    if add_protocol:
+        filename.append("%p")
+    if add_sequence:
+        filename.append("%q")
+    if add_serie:
+        filename.append("%s")
+    if add_time:
+        filename.append("%t")
+
+    if len(filename) > 0:
+        config["f"] = "_".join(filename)
+
+    config["s"] = MAP[single_dicom]
+    config["t"] = MAP[private_details]
+    config["v"] = MAP[verbose]
+    # we choose to use pigz instead of in internal zipper
+    config["z"] = MAP[gzip]
+#    config["bc"] = begin_clip
+#    config["ec"] = end_clip
+
+    if write_config:
+        # Write the configuration file
+        config_file = os.path.join(niidir, "dcm2nii.ini")
+        with open(config_file, "w") as _file:
+            json.dump(config, _file, indent=2)
+
+    return config
+
+
+def dcm2niix(input, config):
+    """ Dicom to nifti conversion using 'dcm2niix'.
+
+    The basic usage is:
+        usage: dcm2niix [options] <in_folder>
+    Options :
+         -b : BIDS sidecar (y/n, default n)
+         -f : filename (%c=comments %f=folder name %i ID of patient %m=manufacturer %n=name of patient %p=protocol, %q=sequence %s=series, %t=time; default '%f_%p_%t_%s')
+         -h : show help
+         -o : output directory (omit to save to input folder)
+         -s : single file mode, do not convert other images in folder (y/n, default n)
+         -t : text notes includes private patient details (y/n, default n)
+         -v : verbose (y/n, default n)
+         -z : gz compress images (y/i/n, default n) [y=pigz, i=internal, n=no]
+        Defaults file : /home/dg240989/.dcm2nii.ini
+        Examples :
+         dcm2niix /Users/chris/dir
+         dcm2niix -o /users/cr/outdir/ -z y ~/dicomdir
+         dcm2niix -f mystudy%s ~/dicomdir
+         dcm2niix -o "~/dir with spaces/dir" ~/dicomdir
+    Example output filename: '/myFolder_MPRAGE_19770703150928_1.nii'
+
+
+    Returns
+    -------
+    files: list of str
+        the converted files in nifti format.
+    bvecs: list of str
+        the diffusion directions.
+    bvals: list of str
+        the diffusion acquisiton b-values.
+    """
+    # Get the destination folder
+    if not os.path.isdir(config["o"]):
+        raise Dcm2NiiError("Expects a destination folder.")
+
+    # list ourputDir
+    old_items = os.listdir(config["o"])
+    if len(old_items) > 0:
+        if config["v"] == "y":
+            print("WARNING: {} elements in output directory, they won't be"
+                  " counted aspipeline outputs, even if overwritten".format(
+                      len(old_items)))
+
+    # Call dcm2nii
+    dcm2niixprocess = Dcm2NiixWrapper("dcm2niix")
+    dcm2niixprocess(config=config)
+    if dcm2niixprocess.exitcode != 0:
+        raise Dcm2NiixRuntimeError(
+            dcm2niixprocess.cmd[0], " ".join(dcm2niixprocess.cmd[1:]),
+            dcm2niixprocess.stderr)
+
+    # Format outputs: from nipype
+    files = []
+    bvecs = []
+    bvals = []
+
+    # Can't parse the stdout, parsing outdir
+    for item in os.listdir(config["o"]):
+        if item in old_items:
+            continue
+        if item.split(".")[-1] == "bvec":
+            bvecs.append(os.path.join(config["o"], item))
+        elif item.split(".")[-1] == "bval":
+            bvals.append(os.path.join(config["o"], item))
+        elif "nii" in item.split("."):
+            files.append(os.path.join(config["o"], item))
+
+    return files, bvecs, bvals
 
 
 def add_meta_to_nii(nii_files, dicom_dir, dcm_tags, output_directory,
@@ -326,7 +516,7 @@ def mosaic(impath, outdir, strategy="average", indices=None, title=None):
     if len(array.dtype) > 0:
         array = numpy.asarray(array.tolist())
     shape = array.shape
-        
+
     if array.ndim < 3 or array.ndim > 4:
         raise Exception("Only 3d or 4d images are accepted.")
     if array.ndim == 4 and strategy == "average":
@@ -350,5 +540,5 @@ def mosaic(impath, outdir, strategy="average", indices=None, title=None):
     fig.savefig(snap, dpi=300)
 
     return snap
-        
-    
+
+
