@@ -339,7 +339,7 @@ def get_nb_temporal_position(path_to_dicom):
 
 def get_manufacturer_name(path_to_dicom):
     """
-    Get sequence name as string
+    Get manufacturer name as string
 
     ..note: spaces are replaced by "_" in the extracted value
 
@@ -361,7 +361,7 @@ def get_manufacturer_name(path_to_dicom):
 
 def get_manufacturer_model_name(path_to_dicom):
     """
-    Get sequence name as string
+    Get manufacturer model name as string
 
     ..note: spaces are replaced by "_" in the extracted value
 
@@ -401,6 +401,49 @@ def get_sequence_name(path_to_dicom):
     if value:
         return value.replace(" ", "_")
     return "unknown"
+
+
+def get_SOPInstanceUID(path_to_dicom):
+    """
+    Get SOP instance uid name as string
+
+    ..note: spaces are replaced by "_" in the extracted value
+
+    Parameters
+    ----------
+    inputs :
+        path_to_dicom: a filepath (mandatory) to the dicom from which the
+            data extraction will be made
+
+    Returns :
+        the uid ('unknown' if the value is not found)
+    """
+    dataset = dicom.read_file(path_to_dicom, force=True)
+    value = walk(dataset, walker_callback, (0x0008, 0x0018))
+    if value:
+        return value.replace(" ", "_")
+    return "unknown"
+
+
+def get_InstanceCreationTime(path_to_dicom):
+    """
+    Get screation time as float
+
+    Parameters
+    ----------
+    inputs :
+        path_to_dicom: a filepath (mandatory) to the dicom from which the
+            data extraction will be made
+
+    Returns :
+        the creation time ('unknown' if the value is not found)
+    """
+    dataset = dicom.read_file(path_to_dicom, force=True)
+    value = walk(dataset, walker_callback, (0x0008, 0x0013))
+    if value:
+        return float(value)
+    return "unknown"
+
 
 
 def get_protocol_name(path_to_dicom):
